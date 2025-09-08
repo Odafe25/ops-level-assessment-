@@ -10,6 +10,9 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y ca-certificates curl gnupg lsb-release git nginx
 
+# Ensure nginx is enabled early
+systemctl enable --now nginx
+
 # Docker + Compose
 if ! command -v docker >/dev/null 2>&1; then
   install -m 0755 -d /etc/apt/keyrings
@@ -65,6 +68,7 @@ chmod 600 /etc/nginx/ssl/app/privkey.pem
 SERVER_NAME_LINE="server_name $DOMAIN;"
 if [ -z "$DOMAIN" ]; then SERVER_NAME_LINE="server_name _;"; fi
 
+# Write vhost with root redirect to /hello and proxy to the app
 # This heredoc is unquoted so the shell expands $SERVER_NAME_LINE,
 # while \$host etc remain literal for Nginx.
 cat >/etc/nginx/sites-available/hello.conf <<NGINX
@@ -86,6 +90,11 @@ server {
     access_log /var/log/nginx/hello.access.log;
     error_log  /var/log/nginx/hello.error.log;
 
+    # Redirect only root (/) to the app's handler path
+    location = / {
+        return 302 /hello;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
@@ -97,6 +106,10 @@ server {
 }
 NGINX
 
+# Enable our site and ensure the default site is disabled so it can't shadow us
 ln -sf /etc/nginx/sites-available/hello.conf /etc/nginx/sites-enabled/hello.conf
+rm -f /etc/nginx/sites-enabled/default
+
+# Validate and reload nginx
 nginx -t
 systemctl reload nginx
